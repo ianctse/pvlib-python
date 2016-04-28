@@ -292,13 +292,13 @@ def readtmy2(filename):
     =============    ==================================
     key              description
     =============    ==================================
-    SiteID           Site identifier code (WBAN number)
-    StationName      Station name
-    StationState     Station state 2 letter designator
-    SiteTimeZone     Hours from Greenwich
+    WBAN             Site identifier code (WBAN number)
+    City             Station name
+    State            Station state 2 letter designator
+    TZ               Hours from Greenwich
     latitude         Latitude in decimal degrees
     longitude        Longitude in decimal degrees
-    SiteElevation    Site elevation in meters
+    altitude         Site elevation in meters
     =============    ==================================
 
     ============================   ==========================================================================================================================================================================
@@ -428,7 +428,7 @@ def _parsemeta_tmy2(columns, line):
     meta.append(float(rawmeta[10]))	
     
     meta_dict = dict(zip(columns.split(','),meta)) #Creates a dictionary of metadata
-    pvl_logger.debug('meta: {}'.format(meta_dict))
+    pvl_logger.debug('meta: %s', meta_dict)
     
     return meta_dict
 

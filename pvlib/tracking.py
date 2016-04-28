@@ -7,6 +7,157 @@ import numpy as np
 import pandas as pd
 
 from pvlib.tools import cosd, sind
+from pvlib.pvsystem import PVSystem
+from pvlib.location import Location
+from pvlib import irradiance, atmosphere
+
+# should this live next to PVSystem? Is this even a good idea?
+# possibly should inherit from an abstract base class Tracker
+# All children would define their own ``track`` method
+class SingleAxisTracker(PVSystem):
+    """
+    Inherits all of the PV modeling methods from PVSystem.
+    """
+
+    def __init__(self, axis_tilt=0, axis_azimuth=0,
+                 max_angle=90, backtrack=True, gcr=2.0/7.0, **kwargs):
+        
+        self.axis_tilt = axis_tilt
+        self.axis_azimuth = axis_azimuth
+        self.max_angle = max_angle
+        self.backtrack = backtrack
+        self.gcr = gcr
+        
+        super(SingleAxisTracker, self).__init__(**kwargs)
+
+
+    def singleaxis(self, apparent_zenith, apparent_azimuth):
+        tracking_data = singleaxis(apparent_zenith, apparent_azimuth,
+                                   self.axis_tilt, self.axis_azimuth,
+                                   self.max_angle,
+                                   self.backtrack, self.gcr)
+        
+        return tracking_data
+
+
+    def localize(self, location=None, latitude=None, longitude=None,
+                 **kwargs):
+        """Creates a :py:class:`LocalizedSingleAxisTracker`
+        object using this object and location data.
+        Must supply either location object or
+        latitude, longitude, and any location kwargs
+        
+        Parameters
+        ----------
+        location : None or Location
+        latitude : None or float
+        longitude : None or float
+        **kwargs : see Location
+        
+        Returns
+        -------
+        localized_system : LocalizedSingleAxisTracker
+        """
+
+        if location is None:
+            location = Location(latitude, longitude, **kwargs)
+
+        return LocalizedSingleAxisTracker(pvsystem=self, location=location)
+
+
+    def get_irradiance(self, dni, ghi, dhi,
+                       dni_extra=None, airmass=None, model='haydavies',
+                       **kwargs):
+        """
+        Uses the :func:`irradiance.total_irrad` function to calculate
+        the plane of array irradiance components on a tilted surface
+        defined by 
+        ``self.surface_tilt``, ``self.surface_azimuth``, and
+        ``self.albedo``.
+        
+        Parameters
+        ----------
+        solar_zenith : float or Series.
+            Solar zenith angle.
+        solar_azimuth : float or Series.
+            Solar azimuth angle.
+        dni : float or Series
+            Direct Normal Irradiance
+        ghi : float or Series
+            Global horizontal irradiance
+        dhi : float or Series
+            Diffuse horizontal irradiance
+        dni_extra : float or Series
+            Extraterrestrial direct normal irradiance
+        airmass : float or Series
+            Airmass
+        model : String
+            Irradiance model.
+        
+        **kwargs
+            Passed to :func:`irradiance.total_irrad`.
+        
+        Returns
+        -------
+        poa_irradiance : DataFrame
+            Column names are: ``total, beam, sky, ground``.
+        """
+
+        surface_tilt = kwargs.pop('surface_tilt', self.surface_tilt)
+        surface_azimuth = kwargs.pop('surface_azimuth', self.surface_azimuth)
+        
+        try:
+            solar_zenith = kwargs['solar_zenith']
+        except KeyError:
+            solar_zenith = self.solar_zenith
+        
+        try:
+            solar_azimuth = kwargs['solar_azimuth']
+        except KeyError:
+            solar_azimuth = self.solar_azimuth
+
+        # not needed for all models, but this is easier
+        if dni_extra is None:
+            dni_extra = irradiance.extraradiation(solar_zenith.index)
+            dni_extra = pd.Series(dni_extra, index=solar_zenith.index)
+
+        if airmass is None:
+            airmass = atmosphere.relativeairmass(solar_zenith)
+
+        return irradiance.total_irrad(surface_tilt,
+                                      surface_azimuth,
+                                      solar_zenith,
+                                      solar_azimuth,
+                                      dni, ghi, dhi,
+                                      dni_extra=dni_extra, airmass=airmass,
+                                      model=model,
+                                      albedo=self.albedo,
+                                      **kwargs)
+
+
+class LocalizedSingleAxisTracker(SingleAxisTracker, Location):
+    """Highly experimental."""
+
+    def __init__(self, pvsystem=None, location=None, **kwargs):
+
+        # get and combine attributes from the pvsystem and/or location
+        # with the rest of the kwargs
+
+        if pvsystem is not None:
+            pv_dict = pvsystem.__dict__
+        else:
+            pv_dict = {}
+
+        if location is not None:
+            loc_dict = location.__dict__
+        else:
+            loc_dict = {}
+
+        new_kwargs = dict(list(pv_dict.items()) +
+                          list(loc_dict.items()) +
+                          list(kwargs.items()))
+
+        super(LocalizedSingleAxisTracker, self).__init__(**new_kwargs)
 
 
 def singleaxis(apparent_zenith, apparent_azimuth, 
@@ -93,13 +244,12 @@ def singleaxis(apparent_zenith, apparent_azimuth,
     
     pvl_logger.debug('tracking.singleaxis')
     
-    pvl_logger.debug(('axis_tilt={}, axis_azimuth={}, max_angle={}, ' +
-                      'backtrack={}, gcr={:.3f}')
-                     .format(axis_tilt, axis_azimuth, max_angle, backtrack,
-                             gcr))
+    pvl_logger.debug('axis_tilt=%s, axis_azimuth=%s, max_angle=%s, ' +
+                     'backtrack=%s, gcr=%.3f',
+                     axis_tilt, axis_azimuth, max_angle, backtrack, gcr)
                              
-    pvl_logger.debug('\napparent_zenith=\n{}\napparent_azimuth=\n{}'
-                     .format(apparent_zenith.head(), apparent_azimuth.head()))
+    pvl_logger.debug('\napparent_zenith=\n%s\napparent_azimuth=\n%s',
+                     apparent_zenith.head(), apparent_azimuth.head())
     
     # MATLAB to Python conversion by 
     # Will Holmgren (@wholmgren), U. Arizona. March, 2015.
@@ -139,7 +289,7 @@ def singleaxis(apparent_zenith, apparent_azimuth,
     # wholmgren: strange to see axis_azimuth calculated differently from az,
     # (not that it matters, or at least it shouldn't...).
     axis_azimuth_south = axis_azimuth - 180
-    pvl_logger.debug('axis_azimuth_south={}'.format(axis_azimuth_south))
+    pvl_logger.debug('axis_azimuth_south=%s', axis_azimuth_south)
 
     # translate input array tilt angle axis_tilt to [1] coordinate system.
     
@@ -254,34 +404,34 @@ def singleaxis(apparent_zenith, apparent_azimuth,
     rot_x = np.array([[1, 0, 0], 
                       [0, cosd(-axis_tilt), -sind(-axis_tilt)], 
                       [0, sind(-axis_tilt), cosd(-axis_tilt)]])
-    pvl_logger.debug('rot_x=\n{}'.format(rot_x))
+    pvl_logger.debug('rot_x=\n%s', rot_x)
     
     # panel_norm_earth contains the normal vector
     # expressed in earth-surface coordinates
     # (z normal to surface, y aligned with tracker axis parallel to earth)
     panel_norm_earth = np.dot(rot_x, panel_norm).T
-    pvl_logger.debug('panel_norm_earth={}'.format(panel_norm_earth))
+    pvl_logger.debug('panel_norm_earth=%s', panel_norm_earth)
     
     # projection to plane tangent to earth surface,
     # in earth surface coordinates
     projected_normal = np.array([panel_norm_earth[:,0], 
                                  panel_norm_earth[:,1], 
                                  panel_norm_earth[:,2]*0]).T
-    pvl_logger.debug('projected_normal={}'.format(projected_normal))
+    pvl_logger.debug('projected_normal=%s', projected_normal)
     
     # calculate vector magnitudes
     panel_norm_earth_mag = np.sqrt(np.nansum(panel_norm_earth**2, axis=1))
     projected_normal_mag = np.sqrt(np.nansum(projected_normal**2, axis=1))
-    pvl_logger.debug('panel_norm_earth_mag={}, projected_normal_mag={}'
-                     .format(panel_norm_earth_mag, projected_normal_mag))
+    pvl_logger.debug('panel_norm_earth_mag=%s, projected_normal_mag=%s',
+                     panel_norm_earth_mag, projected_normal_mag)
 
     # renormalize the projected vector
     # avoid creating nan values.
     non_zeros = projected_normal_mag != 0
     projected_normal[non_zeros] = (projected_normal[non_zeros].T / 
                                    projected_normal_mag[non_zeros]).T
-    pvl_logger.debug('renormalized projected_normal={}'
-                     .format(projected_normal))
+    pvl_logger.debug('renormalized projected_normal=%s',
+                     projected_normal)
 
     # calculation of surface_azimuth
     # 1. Find the angle.
@@ -335,7 +485,7 @@ def singleaxis(apparent_zenith, apparent_azimuth,
     
     # 4. Rotate 0 reference from panel's x axis to it's y axis and
     #    then back to North.
-    surface_azimuth += 90 + axis_azimuth
+    surface_azimuth = 90-surface_azimuth + axis_azimuth
     
     # 5. Map azimuth into [0,360) domain.
     surface_azimuth[surface_azimuth<0] += 360

@@ -11,6 +11,10 @@ try:
 except ImportError:
     raise RuntimeError('setuptools is required')
 
+
+import versioneer
+
+
 DESCRIPTION = 'The PVLIB toolbox provides a set functions for simulating the performance of photovoltaic energy systems.'
 LONG_DESCRIPTION = open('README.md').read()
 
@@ -20,18 +24,13 @@ AUTHOR = 'Dan Riley, Clifford Hanson, Rob Andrews, Will Holmgren, github contrib
 MAINTAINER_EMAIL = 'holmgren@email.arizona.edu'
 URL = 'https://github.com/pvlib/pvlib-python'
 
-# imports __version__ into the local namespace
-version_file = os.path.join(os.path.dirname(__file__), 'pvlib/version.py')
-with open(version_file, 'r') as f:
-    exec(f.read())
-
 # check python version.
-if not sys.version_info[:2] in ((2,7), (3,3), (3,4)):
+if not sys.version_info[:2] in ((2,7), (3,3), (3,4), (3,5)):
    sys.exit('%s requires Python 2.7, 3.3, or 3.4' % DISTNAME)
 
 setuptools_kwargs = {
     'zip_safe': False,
-    'install_requires': ['numpy >= 1.7.0',
+    'install_requires': ['numpy >= 1.8.2',
                          'pandas >= 0.13.1',
                          'pytz',
                          'six',
@@ -63,7 +62,8 @@ else:
 
  
 setup(name=DISTNAME,
-      version=__version__,
+      version=versioneer.get_version(),
+      cmdclass=versioneer.get_cmdclass(),
       packages=PACKAGES,
       ext_modules=extensions,
       description=DESCRIPTION,
